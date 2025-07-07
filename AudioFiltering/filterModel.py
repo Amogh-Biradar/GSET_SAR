@@ -130,6 +130,41 @@ def train(trainSet):
         # Save trained model to the project
         torch.save(model.state_dict(), "denoiser_model.pth")
 
+# Calculate Mean Squared Error by comparing actual signal to model output
+def calcMSE(true_signal, cleaned_signal):
+    # Error checking to ensure both signals are the same length
+    if len(true_signal) != len(cleaned_signal):
+        raise ValueError("Signal and noise must have the same length.")
+    
+    # Calculate the mean squared error
+
+    return (1 / len(true_signal)) * sum((true_signal[i] - cleaned_signal[i])**2 for i in range(len(true_signal)))
+
+# Calculate accuracy on a scale of 0-1 based on mean squared error and true/output signals
+def calcAccuracy(true_signal, cleaned_signal):
+    power = (1 / len(true_signal)) * sum(signal**2 for signal in true_signal)
+    return 1 - calcMSE(true_signal, cleaned_signal) / power
+
+# Test the model
+def test(testMixed, testClean):
+    # Specify model architecture, load trained weights, and set to evaluation mode
+    model = Denoiser()
+    model.load_state_dict(torch.load("model.pth"))
+    model.eval()
+
+    # Create an accuracy sum and number of tests for average accuracy calculation
+    sumAccuracy = 0
+    numTests = len(testMixed)
+
+    # Iterate through test dataset; filter each mixed sound and calculate accuracy
+    for idx in range(testMixed):
+        output = model(testMixed[idx].unsqueeze(0)).squeeze(0)
+        sumAccuracy += calcAccuracy(testClean[idx], output) * 100
+    
+    # Print average test accuracy
+    print(f"Average Accuracy: {sumAccuracy / numTests:.2f}%")
+
+
 if __name__ == "__main__":
     # Split spectrogram dataset into training set and validation clean and mixed sets
     trainSet, testMixed, testClean = split()
@@ -137,4 +172,3 @@ if __name__ == "__main__":
     # Train the model
     train(trainSet)
 
-    
