@@ -1,0 +1,133 @@
+import os
+import pandas as pd
+import librosa
+import numpy as np
+from pathlib import Path
+import wave
+import contextlib
+
+def extract_audio_features(wav_file_path):
+    """Extract various features from a WAV file"""
+    try:
+        # Load audio file
+        y, sr = librosa.load(wav_file_path, sr=None)
+        
+        # Basic file info
+        duration = librosa.get_duration(y=y, sr=sr)
+        
+        # Extract features
+        features = {
+            'filename': os.path.basename(wav_file_path),
+            'filepath': wav_file_path,
+            'duration_seconds': duration,
+            'sample_rate': sr,
+            'num_samples': len(y),
+            'max_amplitude': np.max(np.abs(y)),
+            'rms_energy': np.sqrt(np.mean(y**2)),
+            'zero_crossing_rate': np.mean(librosa.feature.zero_crossing_rate(y)),
+            'spectral_centroid': np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)),
+            'spectral_rolloff': np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr)),
+            'mfcc_mean': np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)),
+            'tempo': librosa.beat.tempo(y=y, sr=sr)[0] if len(librosa.beat.tempo(y=y, sr=sr)) > 0 else 0
+        }
+        
+        return features
+        
+    except Exception as e:
+        print(f"Error processing {wav_file_path}: {str(e)}")
+        return None
+
+def extract_basic_info(wav_file_path, category):
+    """Extract basic file information (faster alternative)"""
+    try:
+        with contextlib.closing(wave.open(wav_file_path, 'r')) as f:
+            frames = f.getnframes()
+            sample_rate = f.getframerate()
+            duration = frames / float(sample_rate)
+            channels = f.getnchannels()
+            sample_width = f.getsampwidth()
+            
+        return {
+            'filename': os.path.basename(wav_file_path),
+            'filepath': wav_file_path,
+            'duration_seconds': duration,
+            'sample_rate': sample_rate,
+            'channels': channels,
+            'category': category,
+            'sample_width_bytes': sample_width,
+            'total_frames': frames,
+            'file_size_mb': os.path.getsize(wav_file_path) / (1024 * 1024)
+        }
+        
+    except Exception as e:
+        print(f"Error processing {wav_file_path}: {str(e)}")
+        return None
+
+def wav_folder_to_csv(folder_path, output_csv_path, category, mode='basic'):
+    """
+    Convert a folder of WAV files to CSV
+    
+    Args:
+        folder_path: Path to folder containing WAV files
+        output_csv_path: Path for output CSV file
+        mode: 'basic' for file info only, 'features' for audio analysis
+    """
+    
+    # Find all WAV files
+    wav_files = []
+    for ext in ['*.wav', '*.WAV']:
+        wav_files.extend(Path(folder_path).glob(ext))
+    
+    if not wav_files:
+        print(f"No WAV files found in {folder_path}")
+        return
+    
+    print(f"Found {len(wav_files)} WAV files")
+    
+    # Process each file
+    data = []
+    for i, wav_file in enumerate(wav_files, 1):
+        print(f"Processing {i}/{len(wav_files)}: {wav_file.name}")
+        
+        if mode == 'basic':
+            file_data = extract_basic_info(str(wav_file), category)
+        elif mode == 'features':
+            file_data = extract_audio_features(str(wav_file))
+        
+        if file_data:
+            data.append(file_data)
+    
+    # Create DataFrame and save to CSV
+    if data:
+        df = pd.DataFrame(data)
+        df.to_csv(output_csv_path, index=False)
+        print(f"\nCSV saved to: {output_csv_path}")
+        print(f"Processed {len(data)} files successfully")
+        print(f"Columns: {list(df.columns)}")
+        return df
+    else:
+        print("No data to save")
+        return None
+
+# Example usage
+if __name__ == "__main__":
+    # Configuration
+    FOLDER_PATH = "NotScreaming"  # Change this to your folder path
+    FOLDER_PATH_2 = "Screaming"
+    OUTPUT_CSV = "NotScream.csv"      # Output CSV filename
+    OUTPUT_CSV_2 = "Scream.csv"
+    
+    # Choose mode: 'basic' for file info only, 'features' for audio analysis
+    MODE = 'basic'  # Change to 'features' for detailed audio analysis
+    
+    # Convert WAV files to CSV
+    df = wav_folder_to_csv(FOLDER_PATH, OUTPUT_CSV,"NotScreaming", mode=MODE)
+    df2 = wav_folder_to_csv(FOLDER_PATH_2, OUTPUT_CSV_2, "Screaming", mode = MODE)
+    
+    # Optional: Display first few rows
+    if df is not None:
+        print("\nFirst 5 rows of the CSV:")
+        print(df.head())
+
+# Required installations:
+# pip install pandas librosa numpy pathlib
