@@ -1,0 +1,14 @@
+import matplotlib.pyplot as plt
+
+def plot_spectrogram(waveform, sample_rate, title='Spectrogram'):
+    # Compute the spectrogram (STFT)
+    D = librosa.stft(waveform, n_fft=1024, hop_length=512)
+    S_db = librosa.amplitude_to_db(np.abs(D), ref=np.max)
+
+    # Plot
+    plt.figure(figsize=(10, 4))
+    librosa.display.specshow(S_db, sr=sample_rate, hop_length=512, x_axis='time', y_axis='hz', cmap='magma')
+    plt.colorbar(format='%+2.0f dB')
+    plt.title(title)
+    plt.tight_layout()
+    plt.show()
