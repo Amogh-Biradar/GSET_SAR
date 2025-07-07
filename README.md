@@ -4,4 +4,4 @@ Search and Rescue (SAR) operations take place in environments where time is crit
 
 Current SAR technology faces significant challenges related to limited on-device AI processing, inefficient decision-making, and significant communication bottlenecks. In disaster regions, traditional wireless infrastructure can be limited or nonexistent, and the need for near-instantaneous decision-making necessitates strong computational capabilities on-device.
 
-We used this [dataset]((https://www.kaggle.com/datasets/whats2000/human-screaming-detection-dataset)) to collect audio samples of Human Screams.
+We used this dataset to collect audio samples of Human Screams: https://www.kaggle.com/datasets/whats2000/human-screaming-detection-dataset
