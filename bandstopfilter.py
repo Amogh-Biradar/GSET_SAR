@@ -35,6 +35,7 @@ def drone_noise_bandstopfilter(audio_recording_path):
     base, ext = os.path.splitext(audio_recording_path)
     output_path = base+"_filter"+ext
     wavfile.write(output_path, fs, filtered_data.astype(np.int16))
+    return output_path
     
     
 
