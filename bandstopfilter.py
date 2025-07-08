@@ -1,14 +1,14 @@
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import iirnotch, butter, filtfilt
-
+import os
 def drone_noise_bandstopfilter(audio_recording_path):
 
     #1 reasing .wav file
     fs, data = wavfile.read(audio_recording_path)  #fs = sampling rate
     data = data.astype(float)  #make it float so that it can be filtered
 
-    if(len(data) > 1):
+    if(data.ndim > 1):
         data = data.mean(axis=1)
 
     # 2. This is to filter out frequencies very close to 130 Hz
@@ -32,6 +32,10 @@ def drone_noise_bandstopfilter(audio_recording_path):
 
 
     # saves filtered audio to new location
-    wavfile.write('drone_filtered_output.wav', fs, filtered_data.astype(np.int16))
+    base, ext = os.path.splitext(audio_recording_path)
+    output_path = base+"_filter"+ext
+    wavfile.write(output_path, fs, filtered_data.astype(np.int16))
+    
+    
 
 
