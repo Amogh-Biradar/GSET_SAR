@@ -6,7 +6,6 @@ from scipy.optimize import minimize
 
 
 
-
 def to_mono(sig):
     return sig.mean(axis=1) if sig.ndim > 1 else sig
 
