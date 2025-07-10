@@ -3,6 +3,8 @@ import torchaudio
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from filterModel import Denoiser1D  # your new 1D model
+import soundfile as sf
+import noisereduce as nr
 
 # === Load Model ===
 model = Denoiser1D()
@@ -28,7 +30,14 @@ mixed_wave = preprocess_wave(mixed_wave)
 
 # === Denoise using 1D CNN ===
 with torch.no_grad():
-    output_wave = model(mixed_wave.unsqueeze(0)).squeeze(0) * 35
+    output_wave = model(mixed_wave.unsqueeze(0)).squeeze(0)
+    
+    # Convert to 1D numpy array for noise reduction
+    output_np = output_wave.squeeze().detach().numpy()
+    output_denoised = nr.reduce_noise(y=output_np, sr=sample_rate, prop_decrease = 0.75)
+
+    # Convert back to tensor for saving
+    output_wave = torch.tensor(output_denoised, dtype=torch.float32).unsqueeze(0) * 50
 
 # === Save Output Files ===
 torchaudio.save("sampleAudio/filtered1.wav", output_wave, sample_rate)
