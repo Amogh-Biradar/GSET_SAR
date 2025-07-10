@@ -55,12 +55,8 @@ if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
     audio_files = [
         wavfile.read(os.path.join(base_dir, "test_mic_a.wav")),
-        wavfile.read(os.path.join(base_dir, "test_mic_a_0.2_shift.wav")),
-        wavfile.read(os.path.join(base_dir, "test_mic_a_0.55_shift.wav"))
+        wavfile.read(os.path.join(base_dir, "distorted_test_mic_a_0.2_shift.wav"))
     ]
     fs1, sig1 = audio_files[0]
     fs2, sig2 = audio_files[1]
-    fs3, sig3 = audio_files[2]
     print(gcc_phat(sig1, sig2, fs=fs1)[0])
-    print(gcc_phat(sig1, sig3, fs=fs1)[0])
-    print(gcc_phat(sig2, sig3, fs=fs2)[0])
