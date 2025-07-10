@@ -42,10 +42,10 @@ from torch.utils.data import DataLoader
 #             torch.save(mix_spec, f"specs/mixed/{self.mixed_files[idx]}.pt")
 #             torch.save(clean_spec, f"specs/clean/{self.clean_files[idx]}.pt")
 
-    # Get all items from the dataset and store in a mixed and clean spectrogram list
-    def saveItems(self):
-        for idx in range(1200):
-            self.oneSound(idx)
+    # # Get all items from the dataset and store in a mixed and clean spectrogram list
+    # def saveItems(self):
+    #     for idx in range(1200):
+    #         self.oneSound(idx)
 
     
 class Denoiser1D(nn.Module):
