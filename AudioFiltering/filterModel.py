@@ -11,36 +11,36 @@ from torch.utils.data import DataLoader
 
 
 # Initialize and create dataset and functions for spectrogram mixed and clean sounds 
-class NoisyData(Dataset):
-    # Initialize dataset and create ordered mixed and file arrays, directories, length of arrays
-    def __init__(self, mixed_dir, clean_dir):
-        # Example: get list of only .wav files
-        self.mixed_files = [f for f in os.listdir(mixed_dir) if f.endswith(".wav")]
-        self.clean_files = [f for f in os.listdir(clean_dir) if f.endswith(".wav")]
-        self.mixed_dir = mixed_dir
-        self.clean_dir = clean_dir
-        self.length = len(self.mixed_files)
+# class NoisyData(Dataset):
+#     # Initialize dataset and create ordered mixed and file arrays, directories, length of arrays
+#     def __init__(self, mixed_dir, clean_dir):
+#         # Example: get list of only .wav files
+#         self.mixed_files = [f for f in os.listdir(mixed_dir) if f.endswith(".wav")]
+#         self.clean_files = [f for f in os.listdir(clean_dir) if f.endswith(".wav")]
+#         self.mixed_dir = mixed_dir
+#         self.clean_dir = clean_dir
+#         self.length = len(self.mixed_files)
 
-    # Safely load files
-    def safe_load(self, path):
-        # Try to open file with torchaudio
-        try:
-            return torchaudio.load(path)
-        # If impossible, print warning and return None
-        except Exception as e:
-            print(f"Warning: could not load {path}: {e}")
-            return None, None
+#     # Safely load files
+#     def safe_load(self, path):
+#         # Try to open file with torchaudio
+#         try:
+#             return torchaudio.load(path)
+#         # If impossible, print warning and return None
+#         except Exception as e:
+#             print(f"Warning: could not load {path}: {e}")
+#             return None, None
 
-    # Get one mixed and clean sound and convert to spectrogram
-    def oneSound(self, idx):
-        mix_wave, _ = self.safe_load(os.path.join(self.mixed_dir, self.mixed_files[idx]))
-        clean_wave, _ = self.safe_load(os.path.join(self.clean_dir, self.clean_files[idx]))
+#     # Get one mixed and clean sound and convert to spectrogram
+#     def oneSound(self, idx):
+#         mix_wave, _ = self.safe_load(os.path.join(self.mixed_dir, self.mixed_files[idx]))
+#         clean_wave, _ = self.safe_load(os.path.join(self.clean_dir, self.clean_files[idx]))
 
-        mix_spec = wave_to_spec(mix_wave)
-        clean_spec = wave_to_spec(clean_wave)
-        if mix_spec != None and clean_spec != None:
-            torch.save(mix_spec, f"specs/mixed/{self.mixed_files[idx]}.pt")
-            torch.save(clean_spec, f"specs/clean/{self.clean_files[idx]}.pt")
+#         mix_spec = wave_to_spec(mix_wave)
+#         clean_spec = wave_to_spec(clean_wave)
+#         if mix_spec != None and clean_spec != None:
+#             torch.save(mix_spec, f"specs/mixed/{self.mixed_files[idx]}.pt")
+#             torch.save(clean_spec, f"specs/clean/{self.clean_files[idx]}.pt")
 
     # Get all items from the dataset and store in a mixed and clean spectrogram list
     def saveItems(self):
