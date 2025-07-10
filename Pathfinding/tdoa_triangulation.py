@@ -51,20 +51,16 @@ def triangulatePosition(audio, temp = 68, mic_positions=[[0.0,0.0], [1.0, 0.0], 
     return result.x
 
 if __name__ == "__main__":
-    # Example usage
     import os
     base_dir = os.path.dirname(os.path.abspath(__file__))
     audio_files = [
         wavfile.read(os.path.join(base_dir, "test_mic_a.wav")),
-        wavfile.read(os.path.join(base_dir, "test_mic_b.wav")),
-        wavfile.read(os.path.join(base_dir, "test_mic_c.wav"))
+        wavfile.read(os.path.join(base_dir, "test_mic_a_0.2_shift.wav")),
+        wavfile.read(os.path.join(base_dir, "test_mic_a_0.55_shift.wav"))
     ]
-    # Equilateral triangle, side length 1 ft = 0.3048 m
-    side_length = 0.3048
-    mic_positions = [
-        [0.0, 0.0],
-        [side_length, 0.0],
-        [side_length/2, side_length * np.sqrt(3)/2]
-    ]
-    position = triangulatePosition(audio_files, temp=68, mic_positions=mic_positions)
-    print("Estimated position:", position)
+    fs1, sig1 = audio_files[0]
+    fs2, sig2 = audio_files[1]
+    fs3, sig3 = audio_files[2]
+    print(gcc_phat(sig1, sig2, fs=fs1)[0])
+    print(gcc_phat(sig1, sig3, fs=fs1)[0])
+    print(gcc_phat(sig2, sig3, fs=fs2)[0])
