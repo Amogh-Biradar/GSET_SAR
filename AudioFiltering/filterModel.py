@@ -10,57 +10,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 
-# Raw waveform sound to spectrogram for analysis
-def wave_to_spec(waveform):
-    # Check to see if waveform is none. Otherwise, convert to spectrogram
-    if waveform is None:
-        print(f"Skipping file due to load failure.")
-        return None  # or skip, or handle gracefully
-    else:
-        # Crop/pad input waveform to fixed length before spectrogram
-        fixed_length = 60000  # at 16000 Hz
-        if waveform.shape[1] > fixed_length:
-            waveform =  waveform[:, :fixed_length]
-        else:
-            padding = fixed_length - waveform.shape[1]
-            waveform =  torch.nn.functional.pad(waveform, (0, padding))
-
-        # Convert to mono for accuract spectrogram conversion
-        if waveform.ndim == 2 and waveform.size(0) > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-
-        # Ensure correct two-dimesnional shape
-        if waveform.ndim == 1:
-            waveform = waveform.unsqueeze(0)
-
-        # Converts to spectrogram
-        # n_fft = size of FFT (data bins)
-        # hop_length = number of samples between successive frames (overlap)
-        spectrogram = torchaudio.transforms.Spectrogram(n_fft=512, hop_length=256, power=2)(waveform)
-
-        # Add log scaling and normalization
-        spec_db = 10 * torch.log10(spectrogram + 1e-10)  # convert power to dB
-        epsilon = 1e-8
-        spec_db_norm = (spec_db - spec_db.min()) / (spec_db.max() - spec_db.min() + epsilon)
-        print('Successfully converted waveform to spectrogram.')
-        return spec_db_norm
-
-# Converts processed spectrogram back to waveform
-def spec_to_wave(spec):
-    # Ensure shape is [1, freq, time] for GriffinLim
-    if spec.ndim == 2:
-        spec = spec.unsqueeze(0)
-
-    # Error check for malformed spectrogram
-    if spec.size(1) != (512 // 2 + 1):
-        raise ValueError(f"Expected frequency bins = {512 // 2 + 1}, got {spec.size(1)}")
- 
-
-
-    # Inverts spectrogram transformation and converts back to linear scale
-    inverse_transform = torchaudio.transforms.GriffinLim(n_fft=512, hop_length=256)(spec)
-    return inverse_transform
-
 # Initialize and create dataset and functions for spectrogram mixed and clean sounds 
 class NoisyData(Dataset):
     # Initialize dataset and create ordered mixed and file arrays, directories, length of arrays
@@ -90,143 +39,162 @@ class NoisyData(Dataset):
         mix_spec = wave_to_spec(mix_wave)
         clean_spec = wave_to_spec(clean_wave)
         if mix_spec != None and clean_spec != None:
-            torch.save(mix_spec, f"specs/mixed/{idx}.pt")
-            torch.save(clean_spec, f"specs/clean/{idx}.pt")
+            torch.save(mix_spec, f"specs/mixed/{self.mixed_files[idx]}.pt")
+            torch.save(clean_spec, f"specs/clean/{self.clean_files[idx]}.pt")
 
     # Get all items from the dataset and store in a mixed and clean spectrogram list
     def saveItems(self):
         for idx in range(1200):
             self.oneSound(idx)
 
-# Denoiser neural network
-class Denoiser(nn.Module):
-    # Initialize CNN
+    
+class Denoiser1D(nn.Module):
     def __init__(self):
         super().__init__()
-        # Encoder layer to process and condense data
-        self.encoder = nn.Sequential(
-        nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),
-        nn.InstanceNorm2d(16),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.05),
+        self.model = nn.Sequential(
+            nn.Conv1d(1, 16, 15, stride=1, padding=7),
+            nn.ReLU(),
+            nn.Conv1d(16, 64, 15, stride=2, padding=7),
+            nn.ReLU(),
+            nn.Conv1d(64, 256, 15, stride=2, padding=7),
+            nn.ReLU(),
+            nn.Conv1d(256, 512, 15, stride=2, padding=7),
+            nn.ReLU(),
+            nn.ConvTranspose1d(512, 256, 15, stride=2, padding=7, output_padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose1d(256, 64, 15, stride=2, padding=7, output_padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose1d(64, 16, 15, stride=2, padding=7, output_padding=1),
+            nn.ReLU(),
+            nn.Conv1d(16, 1, 15, stride=1, padding=7),
+            nn.Tanh()  # constrain output to [-1, 1]
+        )
 
-        nn.Conv2d(16, 64, kernel_size=3, stride=2, padding=1),
-        nn.InstanceNorm2d(64),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.1),
-
-        nn.Conv2d(64, 256, kernel_size=3, stride=2, padding=1),
-        nn.InstanceNorm2d(256),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.15),
-
-        nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
-        nn.InstanceNorm2d(512),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.2)
-    )
-
-        # Decoder layer to reconstruct the spectrogram from the encoded data
-        self.decoder = nn.Sequential(
-        nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),
-        nn.InstanceNorm2d(256),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.15),
-
-        nn.ConvTranspose2d(256, 64, kernel_size=4, stride=2, padding=1),
-        nn.InstanceNorm2d(64),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.1),
-
-        nn.ConvTranspose2d(64, 16, kernel_size=4, stride=2, padding=1),
-        nn.InstanceNorm2d(16),
-        nn.LeakyReLU(0.1),
-        nn.Dropout(0.05),
-
-        nn.ConvTranspose2d(16, 1, kernel_size=4, stride=2, padding=1),
-        nn.Sigmoid()
-    )
-    
-    # Function to generate output
     def forward(self, x):
-        x = self.encoder(x)
-        return self.decoder(x)
-
-# Normalize spectrogram length with padding
-def pad_spectrograms(spec_list):
-    max_len = max(spec.shape[-1] for spec in spec_list)
-    padded = [
-        F.pad(spec, (0, max_len - spec.shape[-1]))  # pad right side of time dim
-        for spec in spec_list
-    ]
-    return torch.stack(padded)
+        return self.model(x)
 
 def split():
-    # Get spectrogram files and sort into training and testing lists
-    mixed = sorted([f for f in os.listdir('specs/mixed') if f.endswith('.pt')])
+    mixed_dir = 'workingData/mixed'
+    clean_dir = 'workingData/clean'
+    
+    files = sorted([f for f in os.listdir(mixed_dir) if f.endswith('.wav')])
+    files = files[:1000]
+    split_idx = int(len(files) * 0.2)
+    
+    test_names = files[:split_idx]
+    train_names = files[split_idx:]
 
-    trainMixedNames = mixed[int(len(mixed) * 0.2):]
-    trainMixed = []
-    trainClean = []
-    testMixedNames = mixed[:int(len(mixed) * 0.2)]
-    testMixed = []
-    testClean = []
+    def load_wave(filename, directory):
+        waveform, sr = torchaudio.load(os.path.join(directory, filename))
+        waveform = waveform / (waveform.abs().max() + 1e-8)
+        # Mono and padding/cropping]
+        if waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        if waveform.shape[1] > 100000:
+            waveform = waveform[:, :100000]
+        else:
+            waveform = F.pad(waveform, (0, 100000 - waveform.shape[1]))
+        return waveform
+    print("creating names")
+    # === Training Set ===
+    train_mixed = []
+    train_clean = []
+    for name in train_names:
+        train_mixed.append(load_wave(name, mixed_dir))
+        train_clean.append(load_wave(name, clean_dir))
+    print("converting tensors")
+    train_mixed_tensor = torch.stack(train_mixed)
+    train_clean_tensor = torch.stack(train_clean)
+    train_set = TensorDataset(train_mixed_tensor, train_clean_tensor)
+    print("train set created")
+    # === Test Set ===
+    test_mixed = [load_wave(name, mixed_dir) for name in test_names]
+    test_clean = [load_wave(name, clean_dir) for name in test_names]
+    print("split done")
+    return train_set, test_mixed, test_clean
 
-    for name in trainMixedNames:
-        # Load spectrograms from files and append to training list
-        spec = torch.load(os.path.join('specs/mixed', name))
-        trainMixed.append(spec)
+def si_snr_loss(estimation, target, eps=1e-8):
+        # Flatten both tensors (any shape → 1D)
+    estimation = estimation.view(-1) - estimation.view(-1).mean()
+    target = target.view(-1) - target.view(-1).mean()
 
-        spec = torch.load(os.path.join('specs/clean', name))
-        trainClean.append(spec)
-    for name in testMixedNames:
-        # Load spectrograms from files and append to testing list
-        spec = torch.load(os.path.join('specs/mixed', name))
-        testMixed.append(spec)
+    dot = torch.dot(estimation, target)
+    target_energy = torch.sum(target ** 2) + eps
 
-        spec = torch.load(os.path.join('specs/clean', name))
-        testClean.append(spec)
+    proj = (dot / target_energy) * target
+    noise = estimation - proj
 
-    # Convert lists to tensors for machine learning and normalizes length
-    trainMixedTensor = pad_spectrograms(trainMixed)
-    trainCleanTensor = pad_spectrograms(trainClean)
+    ratio = torch.sum(proj ** 2) / (torch.sum(noise ** 2) + eps)
+    ratio = torch.clamp(ratio, min=1e-8)  # avoid log(0)
+    si_snr = 10 * torch.log10(ratio)
 
-    # Create dataset
-    trainSet = TensorDataset(trainMixedTensor, trainCleanTensor)
+    return -si_snr
+# Combined spectrogram + waveform loss
+def combined_loss(output_spec, target_spec):
+    # === Spectrogram Loss ===
+    spec_loss = F.l1_loss(output_spec, target_spec)
 
-    return trainSet, testMixed, testClean
+    # === Griffin-Lim Inversion ===
+    def safe_wave(spec):
+        # Clamp values and run Griffin-Lim safely
+        spec = torch.clamp(spec, 0.0, 1.0)
+        waveform = torchaudio.transforms.GriffinLim(
+            n_fft=512,
+            hop_length=256,
+            win_length=512,
+            power=1.0,
+            n_iter=16,         # lower iteration for speed during training
+        )(spec)
+        return waveform
+
+    # Invert to waveform (batch size 1 assumed)
+    try:
+        est_wave = safe_wave(output_spec.squeeze(1))
+        target_wave = safe_wave(target_spec.squeeze(1))
+    except Exception as e:
+        print("Griffin-Lim inversion error:", e)
+        return spec_loss  # fallback
+
+    # Match lengths
+    min_len = min(est_wave.shape[-1], target_wave.shape[-1])
+    est_wave = est_wave[..., :min_len]
+    target_wave = target_wave[..., :min_len]
+
+    # === SI-SNR Loss ===
+    if target_wave.abs().max() < 1e-4:
+        snr_loss = torch.tensor(0.0)  # Avoid zero-division
+    else:
+        snr_loss = si_snr_loss(est_wave.squeeze(), target_wave.squeeze())
+
+    # === Final Loss ===
+    total_loss = 0.95 * spec_loss + 0.05 * snr_loss
+    return total_loss
+
 
 def train(trainSet):
     # Data loader to load data in batches for model training
     loader = DataLoader(trainSet, batch_size=4, shuffle=True)
 
     # Initialize the model, loss function, optimizer and scheduler (maximize performance)
-    model = Denoiser()
-    criterion = nn.MSELoss()
+    model = Denoiser1D()
+    criterion = nn.L1Loss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
-
+    print('parameters optimized')
     # Training loop
     # Number of training cycles
     num_epochs = 35
     for epoch in range(num_epochs):
         epoch_loss = 0.0  # Will the average loss of the model over the epoch
 
-        for mix_spec, clean_spec in loader:
-            # Denoise the mixed spectrogram to create cleaned version
-            output = model(mix_spec)
-
-            # Crop both tensors to same size for accurate loss calculation
-            min_len = min(output.shape[-1], clean_spec.shape[-1])
+        for mix_wave, clean_wave in loader:
+            output = model(mix_wave)
+            
+            min_len = min(output.shape[-1], clean_wave.shape[-1])
             output = output[..., :min_len]
-            clean_spec = clean_spec[..., :min_len]
+            clean_wave = clean_wave[..., :min_len]
 
-            min_freq = min(output.shape[2], clean_spec.shape[2])
-            output = output[:, :, :min_freq, :]
-            clean_spec = clean_spec[:, :, :min_freq, :]
-
-            # Compute loss with Mean Squared Error by comparing output to original clean spectrogram
-            loss = criterion(output, clean_spec)
+            loss = 0.2 * (si_snr_loss(output, clean_wave)) + 0.8 * F.l1_loss(output, clean_wave)
 
             # Backpropagation by clearing old gradients, calculating new gradients, and updating weights of model parameters
             optimizer.zero_grad()
@@ -246,85 +214,51 @@ def train(trainSet):
         # Save trained model to the project
         torch.save(model.state_dict(), "denoiser_model.pth")
 
-# Calculate Mean Squared Error by comparing actual signal to model output
-def calcMSE(true_signal: torch.Tensor, cleaned_signal: torch.Tensor) -> float:
-    # Flatten both tensors
-    true_signal = true_signal.flatten()
-    cleaned_signal = cleaned_signal.flatten()
-
-    if true_signal.shape != cleaned_signal.shape:
-        raise ValueError("Signal and noise must have the same shape.")
-
-    mse = torch.mean((true_signal - cleaned_signal) ** 2).item()
-    return mse
-
-# Calculate accuracy of the model by comparing the true signal to the cleaned signal
-def calcAccuracy(true_signal: torch.Tensor, cleaned_signal: torch.Tensor) -> float:
-    true_signal = true_signal.flatten()
-    power = torch.mean(true_signal ** 2).item()
-    if power < 1e-8:
-        return 0.0  # signal power too small, consider accuracy zero
-    
-    mse = calcMSE(true_signal, cleaned_signal)
-    accuracy = 1 - (mse / power)
-    return max(0.0, accuracy)  # clamp negative values to 0
-
 # Test the model
 def test(testMixed, testClean):
-    # Specify model architecture, load trained weights, and set to evaluation mode
-    model = Denoiser()
+    model = Denoiser1D()
     model.load_state_dict(torch.load("denoiser_model.pth"))
     model.eval()
 
-    # Create an accuracy sum and number of tests for average accuracy calculation
-    sumAccuracy = 0
+    total_accuracy = 0.0
     numTests = len(testMixed)
 
-    # Iterate through test dataset; filter each mixed sound and calculate accuracy
-    for idx in range(len(testMixed)):
-        clean_spec = testClean[idx]
-        output = model(testMixed[idx].unsqueeze(0)).squeeze(0)
+    for mix_wave, clean_wave in zip(testMixed, testClean):
+        with torch.no_grad():
+            output = model(mix_wave.unsqueeze(0)).squeeze(0)  # [1, 1, T] → [1, T]
 
-        # Print tensor shapes for debugging
-        # print("Pre output shape:", output.shape)
-        # print("Pre clean shape:", clean_spec.shape)
+        min_len = min(output.shape[-1], clean_wave.shape[-1])
+        output = output[..., :min_len]
+        clean_wave = clean_wave[..., :min_len]
 
-        # Get the min shared shape
-        min_freq = min(output.shape[1], clean_spec.shape[1])
-        min_time = min(output.shape[2], clean_spec.shape[2])
+        # Compute SI-SNR loss
+        snr_loss_val = si_snr_loss(output.squeeze(), clean_wave.squeeze()).item()
+        si_snr_db = -snr_loss_val
+        snr_acc = max(0.0, min((si_snr_db + 10) / 40, 1.0))  # map -10–30dB to 0–1
 
-        # Crop both tensors to match
-        output = output[:, :min_freq, :min_time]
-        clean_spec = clean_spec[:, :min_freq, :min_time]
+        # Compute L1 loss accuracy (lower loss = higher accuracy)
+        l1 = F.l1_loss(output, clean_wave).item()
+        l1_acc = max(0.0, min(1.0 - l1 / 0.5, 1.0))  # assume 0.5 is worst-case L1 loss
 
-        # Print tensor shapes for debugging
-        # print("Done output shape:", output.shape)
-        # print("Done clean shape:", clean_spec.shape)
+        # Combine
+        acc = 0.2 * snr_acc + 0.8 * l1_acc
+        total_accuracy += acc
 
-        # Convert back to waves, then cut to same length - for .wav comparison, which is not as good
-        # out_wave = spec_to_wave(output)
-        # clean_wave = spec_to_wave(clean_spec)
-        # min_len = min(clean_wave.shape[-1], out_wave.shape[-1])
-        # clean_wave = clean_wave[..., :min_len]
-        # out_wave = out_wave[..., :min_len]
-
-        sumAccuracy += calcAccuracy(clean_spec.flatten(), output.flatten()) * 100
-
-    # Print average test accuracy
-    print(f"Average Accuracy: {sumAccuracy / numTests:.2f}%")
+    avg_accuracy = (total_accuracy / numTests) * 100
+    print(f"Average Accuracy: {avg_accuracy:.2f}%")
     print("Testing complete.")
 
 
 if __name__ == "__main__":
-    # Create dataset and save spectrograms; comment after first run
-    dataset = NoisyData("workingData/mixed", "workingData/clean")
-    dataset.saveItems()
+    # Create dataset and save spectrograms; comment after first run - outdated code (switched to .wav)
+    # dataset = NoisyData("workingData/mixed", "workingData/clean")
+    # dataset.saveItems()
 
     # Split spectrogram dataset into training set and validation clean and mixed sets
     trainSet, testMixed, testClean = split()
 
     # Train the model
-    train(trainSet)
+    # train(trainSet)
 
     # Test them model
     test(testMixed, testClean)
