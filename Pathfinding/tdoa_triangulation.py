@@ -32,6 +32,9 @@ def triangulatePosition(audio, temp = 68, mic_positions=[[0.0,0.0], [1.0, 0.0], 
     tdoa_2diff1 = gcc_phat(sig2, sig1, fs=fs1)[0]
     tdoa_3diff1 = gcc_phat(sig3, sig1, fs=fs1)[0]
 
+    print("TDOA 2-1:", tdoa_2diff1)
+    print("TDOA 3-1:", tdoa_3diff1)
+
     d_2diff1 = tdoa_2diff1 * v_sound
     d_3diff1 = tdoa_3diff1 * v_sound
 
@@ -46,3 +49,22 @@ def triangulatePosition(audio, temp = 68, mic_positions=[[0.0,0.0], [1.0, 0.0], 
     if not result.success:
         raise ValueError("Optimization failed: " + result.message)
     return result.x
+
+if __name__ == "__main__":
+    # Example usage
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    audio_files = [
+        wavfile.read(os.path.join(base_dir, "test_mic_a.wav")),
+        wavfile.read(os.path.join(base_dir, "test_mic_b.wav")),
+        wavfile.read(os.path.join(base_dir, "test_mic_c.wav"))
+    ]
+    # Equilateral triangle, side length 1 ft = 0.3048 m
+    side_length = 0.3048
+    mic_positions = [
+        [0.0, 0.0],
+        [side_length, 0.0],
+        [side_length/2, side_length * np.sqrt(3)/2]
+    ]
+    position = triangulatePosition(audio_files, temp=68, mic_positions=mic_positions)
+    print("Estimated position:", position)
