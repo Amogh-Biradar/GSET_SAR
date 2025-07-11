@@ -1,36 +1,54 @@
-# import necessary libraries/files
 import torch
-import torch.nn as nn
-from torch.utils.data import Dataset
-import torch.optim as optim
 import torchaudio
-import os
-from torch.utils.data import TensorDataset
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from filterModel import Denoiser, spec_to_wave
+import matplotlib.pyplot as plt
+from filterModel import Denoiser1D  # your new 1D model
+import soundfile as sf
+import noisereduce as nr
 
-model = Denoiser()
+# === Load Model ===
+model = Denoiser1D()
 model.load_state_dict(torch.load("denoiser_model.pth"))
 model.eval()
 
-clean_spec = torch.load('specs/clean/0.pt')
-mixed = torch.load('specs/mixed/0.pt')
+# === Load .wav Files ===
+clean_wave, sample_rate = torchaudio.load('workingData/clean/9.wav')
+mixed_wave, _ = torchaudio.load('workingData/mixed/9.wav')
 
-output = model(mixed.unsqueeze(0)).squeeze(0)
+# === Convert to mono and fixed length (60000) ===
+def preprocess_wave(waveform):
+    if waveform.shape[0] > 1:
+        waveform = waveform.mean(dim=0, keepdim=True)
+    if waveform.shape[1] > 100000:
+        waveform = waveform[:, :100000]
+    else:
+        waveform = F.pad(waveform, (0, 100000 - waveform.shape[1]))
+    return waveform
 
-# Get the min shared shape
-min_freq = min(output.shape[1], clean_spec.shape[1])
-min_time = min(output.shape[2], clean_spec.shape[2])
+clean_wave = preprocess_wave(clean_wave)
+mixed_wave = preprocess_wave(mixed_wave)
 
-# Crop both tensors to match
-output = output[:, :min_freq, :min_time]
-clean_spec = clean_spec[:, :min_freq, :min_time]
+# === Denoise using 1D CNN ===
+with torch.no_grad():
+    output_wave = model(mixed_wave.unsqueeze(0)).squeeze(0)
+    
+    # Convert to 1D numpy array for noise reduction
+    output_np = output_wave.squeeze().detach().numpy()
+    output_denoised = nr.reduce_noise(y=output_np, sr=sample_rate, prop_decrease = 0.75)
 
-out_wave = spec_to_wave(output)
-clean_wave = spec_to_wave(clean_spec)
+    # Convert back to tensor for saving
+    output_wave = torch.tensor(output_denoised, dtype=torch.float32).unsqueeze(0) * 50
 
-print(type(out_wave), out_wave.shape)
+# === Save Output Files ===
+torchaudio.save("sampleAudio/filtered1.wav", output_wave, sample_rate)
+torchaudio.save("sampleAudio/clean1.wav", clean_wave, sample_rate)
+torchaudio.save("sampleAudio/mixed1.wav", mixed_wave, sample_rate)
 
-torchaudio.save("filtered.wav", out_wave, 16000)
-torchaudio.save("clean.wav", clean_wave, 16000)
+# === Plot for Comparison ===
+plt.figure(figsize=(12, 4))
+plt.plot(clean_wave[0].numpy(), label="Original Clean", alpha=0.5)
+plt.plot(mixed_wave[0].numpy(), label="Mixed with Drone", alpha=0.5)
+plt.plot(output_wave[0].detach().numpy(), label="Neural Filter", alpha=0.7)
+plt.legend()
+plt.title("Waveform Comparison")
+plt.show()
