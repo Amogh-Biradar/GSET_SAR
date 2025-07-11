@@ -15,7 +15,9 @@ class Mic:
             self.time_reached = wave.r / Wave.speed
             return True
         return False
-        
+    
+    def calcTrueTime(self, source):
+        return math.sqrt((self.pos[0] - source.pos[0])**2 + (self.pos[1] - source.pos[1])**2) / Wave.speed
 
 class Source:
     def __init__(self, pos):
@@ -34,6 +36,9 @@ class Environment:
     
     def getMics(self):
         return self.mics
+    
+    def getSource(self):
+        return self.source
     
     def checkComplete(self):
         complete = True
@@ -63,8 +68,7 @@ class Wave:
     def incRadius(self):
         self.r += Wave.speed / Environment.freq
 
-def getRandomEnv(mic_positions, maxRad):
-    mics = [Mic(pos) for pos in mic_positions]
+def getRandomEnv(mics, maxRad):
     center_x = mics[0].pos[0]
     center_y = mics[0].pos[1]
 
@@ -73,7 +77,10 @@ def getRandomEnv(mic_positions, maxRad):
     source = Source((center_x + r * math.cos(theta), center_y + r * math.sin(theta)))
     return Environment(mics, source)
 
-def getTDOA(base_mic, other_mic):
+def getEstTDOA(base_mic, other_mic):
     if base_mic.time_reached == None or other_mic.getTime() == None:
             raise ValueError("The wave must have reached both microphones.")
     return other_mic.getTime() - base_mic.getTime()
+
+def getTrueTDOA(base_mic, other_mic, source):
+    return other_mic.calcTrueTime(source) - base_mic.calcTrueTime(source)
