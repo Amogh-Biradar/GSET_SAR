@@ -1,72 +1,41 @@
 import random, math
 
+import numpy as np
+
 class Mic:
-    def __init__(self, pos):
+    def __init__(self, pos, freq, offset_frac=0):
         self.pos = pos
-        self.time_reached = None
-
-    def getTime(self):
-        return self.time_reached
+        self.freq = freq
+        self.offset = offset_frac / freq
     
-    def checkReached(self, wave):
-        if not self.time_reached == None:
-            return True
-        if (self.pos[0] - wave.source_pos[0])**2 + (self.pos[1] - wave.source_pos[1])**2 <= wave.r**2:
-            self.time_reached = wave.r / Wave.speed
-            return True
-        return False
+    def getTimeReached(self, wave):
+        t = self.offset
+        while t * Wave.speed < math.sqrt((self.pos[0] - wave.pos[0])**2 + (self.pos[1] - wave.pos[1])**2):
+            t += 1 / self.freq
+        return t
     
-    def calcTrueTime(self, source):
-        return math.sqrt((self.pos[0] - source.pos[0])**2 + (self.pos[1] - source.pos[1])**2) / Wave.speed
-
-class Source:
-    def __init__(self, pos):
-        self.pos = pos
-    
-    def emit(self):
-        return Wave(self.pos)
+    def calcTrueTime(self, wave):
+        return math.sqrt((self.pos[0] - wave.pos[0])**2 + (self.pos[1] - wave.pos[1])**2) / Wave.speed
 
 class Environment:
     temp = 68
-    freq = 48000
 
-    def __init__(self, mics, source):
+    def __init__(self, mics, wave):
         self.mics = mics
-        self.source = source
+        self.wave = wave
     
     def getMics(self):
         return self.mics
     
-    def getSource(self):
-        return self.source
+    def getWave(self):
+        return self.wave
     
-    def checkComplete(self):
-        complete = True
-        for mic in self.mics:
-            if mic.getTime() == None:
-                complete = False
-                break
-        return complete
-    
-    def runSim(self):
-        t = 0
-        w = self.source.emit()
-        while self.checkComplete() == False:
-            t += 1 / self.freq
-            w.incRadius()
-            for mic in self.mics:
-                mic.checkReached(w)
-
-
 class Wave:
     speed = 331 + 0.6 * (5/9 * (Environment.temp - 32))
 
-    def __init__(self, source_pos):
-        self.source_pos = source_pos
-        self.r = 0
-    
-    def incRadius(self):
-        self.r += Wave.speed / Environment.freq
+    def __init__(self, pos):
+        self.pos = pos
+
 
 def getRandomEnv(mics, maxRad):
     center_x = mics[0].pos[0]
@@ -74,13 +43,17 @@ def getRandomEnv(mics, maxRad):
 
     r = maxRad * math.sqrt(random.random())
     theta = 2 * math.pi * random.random()
-    source = Source((center_x + r * math.cos(theta), center_y + r * math.sin(theta)))
-    return Environment(mics, source)
+    wave = Wave((center_x + r * math.cos(theta), center_y + r * math.sin(theta)))
+    return Environment(mics, wave)
 
-def getEstTDOA(base_mic, other_mic):
-    if base_mic.time_reached == None or other_mic.getTime() == None:
-            raise ValueError("The wave must have reached both microphones.")
-    return other_mic.getTime() - base_mic.getTime()
+def getEstTDOA(base_mic, other_mic, wave):
+    return other_mic.getTimeReached(wave) - base_mic.getTimeReached(wave)
 
-def getTrueTDOA(base_mic, other_mic, source):
-    return other_mic.calcTrueTime(source) - base_mic.calcTrueTime(source)
+def getTrueTDOA(base_mic, other_mic, wave):
+    return other_mic.calcTrueTime(wave) - base_mic.calcTrueTime(wave)
+
+if __name__ == "__main__":
+
+    env = Environment([Mic((0, 0), 192000), Mic((0.05, 0), 48000), Mic((0.025, 0.0433), 48000)], Wave((1, 1)))
+    for mic in env.getMics():
+        print(f"Mic at {mic.pos} measures the noise at {round(mic.getTimeReached(env.getWave()), 8)} seconds \n but it is truly recieved at {round(mic.calcTrueTime(env.getWave()), 8)} seconds")

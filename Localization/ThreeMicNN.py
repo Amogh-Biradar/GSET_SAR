@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # 1. Get data
-N = 10000  # Sample size
+N = 5000  # Sample size
 measured, true = get3micSimData(N)
 
 # Convert to NumPy arrays for preprocessing
@@ -33,7 +33,7 @@ y_test = torch.tensor(y_test)
 
 # 3. Neural Network with Advanced Architecture
 class TDOACorrector(nn.Module):
-    def __init__(self, input_size=2, hidden_sizes=[256, 128, 64, 32], output_size=2, dropout_rate=0.3):
+    def __init__(self, input_size=2, hidden_sizes=[64, 256, 1024, 256, 64], output_size=2, dropout_rate=0.2):
         super().__init__()
         
         # Input normalization layer
@@ -115,34 +115,103 @@ class CombinedLoss(nn.Module):
 
 criterion = CombinedLoss(alpha=0.8)
 
-# Advanced optimizer with different learning rates for different layers
+
+# Enhanced optimizer with advanced parameter groups and techniques
 param_groups = [
-    {'params': model.input_norm.parameters(), 'lr': 1e-4},  # Lower LR for input norm
-    {'params': model.layers.parameters(), 'lr': 1e-3},      # Standard LR for hidden layers
-    {'params': model.output_layers.parameters(), 'lr': 5e-4} # Lower LR for output layers
+
+    {
+        'params': model.input_norm.parameters(), 
+        'lr': 1e-4,
+        'weight_decay': 1e-5,  # Lower weight decay for normalization layers
+        'betas': (0.9, 0.999),
+        'eps': 1e-8
+    },
+    {
+        'params': model.layers.parameters(), 
+        'lr': 2e-3,  # Increased base learning rate
+        'weight_decay': 1e-4,
+        'betas': (0.9, 0.999),
+        'eps': 1e-8
+    },
+    {
+        'params': model.output_layers.parameters(), 
+        'lr': 8e-4,  # Slightly increased output LR
+        'weight_decay': 5e-5,  # Lower weight decay for output layers
+        'betas': (0.9, 0.999),
+        'eps': 1e-8
+    }
 ]
-optimizer = optim.AdamW(param_groups, weight_decay=1e-4)  # AdamW instead of Adam
 
-# More sophisticated learning rate scheduler
-scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2, eta_min=1e-6)
+# Primary optimizer with enhanced AdamW
+optimizer = optim.AdamW(param_groups, amsgrad=True)  # Enable AMSGrad for better convergence
 
-# 4. Advanced Training Loop with multiple improvements
+# Secondary optimizer for fine-tuning (will be used in later epochs)
+secondary_optimizer = optim.SGD(model.parameters(), lr=1e-4, momentum=0.9, nesterov=True, weight_decay=1e-5)
+
+# Advanced learning rate scheduler with warm-up
+class WarmupCosineScheduler:
+    def __init__(self, optimizer, warmup_epochs=10, max_epochs=300, eta_min=1e-7):
+        self.optimizer = optimizer
+        self.warmup_epochs = warmup_epochs
+        self.max_epochs = max_epochs
+        self.eta_min = eta_min
+        self.base_lrs = [group['lr'] for group in optimizer.param_groups]
+        
+    def step(self, epoch):
+        if epoch < self.warmup_epochs:
+            # Linear warmup
+            warmup_factor = epoch / self.warmup_epochs
+            for i, param_group in enumerate(self.optimizer.param_groups):
+                param_group['lr'] = self.base_lrs[i] * warmup_factor
+        else:
+            # Cosine annealing
+            progress = (epoch - self.warmup_epochs) / (self.max_epochs - self.warmup_epochs)
+            cosine_factor = 0.5 * (1 + np.cos(np.pi * progress))
+            for i, param_group in enumerate(self.optimizer.param_groups):
+                param_group['lr'] = self.eta_min + (self.base_lrs[i] - self.eta_min) * cosine_factor
+
+# Initialize custom scheduler
+custom_scheduler = WarmupCosineScheduler(optimizer, warmup_epochs=15, max_epochs=300, eta_min=1e-7)
+
+# Additional scheduler for fine-tuning phases
+fine_tune_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+    optimizer, mode='min', factor=0.5, patience=20, min_lr=1e-7
+)
+
+# 4. Enhanced Training Loop with advanced optimizer techniques
 epochs = 300
 best_loss = float('inf')
-patience = 30
+patience = 120  # Increased patience for better convergence
 patience_counter = 0
 train_losses = []
 val_losses = []
+learning_rates = []
 
-# Gradient clipping for stability
+# Enhanced gradient clipping with adaptive scaling
 max_grad_norm = 1.0
+grad_norm_history = []
+
+# Optimizer switching parameters
+switch_to_sgd_epoch = 200  # Switch to SGD for fine-tuning
+current_optimizer = optimizer
+use_sgd = False
+
+# Loss smoothing for better early stopping
+loss_smoothing_window = 5
+val_loss_history = []
 
 for epoch in range(epochs):
     model.train()
     epoch_train_loss = 0
     num_batches = 0
     
-    # Mini-batch training for better gradient estimates
+    # Switch to SGD optimizer for fine-tuning in later epochs
+    if epoch >= switch_to_sgd_epoch and not use_sgd:
+        print(f"Switching to SGD optimizer at epoch {epoch+1} for fine-tuning")
+        current_optimizer = secondary_optimizer
+        use_sgd = True
+    
+    # Enhanced mini-batch training
     batch_size = 256
     num_samples = len(X_train)
     
@@ -151,15 +220,24 @@ for epoch in range(epochs):
         batch_X = X_train[i:end_idx]
         batch_y = y_train[i:end_idx]
         
-        optimizer.zero_grad()
+        current_optimizer.zero_grad()
         outputs = model(batch_X)
         loss = criterion(outputs, batch_y)
         loss.backward()
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        # Adaptive gradient clipping
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        grad_norm_history.append(grad_norm.item())
         
-        optimizer.step()
+        # Adjust gradient clipping based on gradient norm history
+        if len(grad_norm_history) > 100:
+            avg_grad_norm = np.mean(grad_norm_history[-100:])
+            if avg_grad_norm > 2.0:
+                max_grad_norm = min(max_grad_norm * 0.95, 2.0)  # Decrease clipping threshold
+            elif avg_grad_norm < 0.5:
+                max_grad_norm = max(max_grad_norm * 1.05, 0.1)  # Increase clipping threshold
+        
+        current_optimizer.step()
         epoch_train_loss += loss.item()
         num_batches += 1
     
@@ -172,30 +250,62 @@ for epoch in range(epochs):
         val_outputs = model(X_test)
         val_loss = criterion(val_outputs, y_test)
         val_losses.append(val_loss.item())
+        val_loss_history.append(val_loss.item())
     
-    # Update learning rate scheduler
-    scheduler.step()
-    
-    # Early stopping check with improvement threshold
-    improvement_threshold = 1e-6
-    if val_loss < best_loss - improvement_threshold:
-        best_loss = val_loss
-        patience_counter = 0
-        # Save best model
-        torch.save({
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scaler_X': scaler_X,
-            'scaler_y': scaler_y,
-            'epoch': epoch,
-            'loss': best_loss
-        }, 'tdoa_corrector_best_model.pth')
+    # Update learning rate schedulers
+    if not use_sgd:
+        custom_scheduler.step(epoch)
+        fine_tune_scheduler.step(val_loss)
     else:
-        patience_counter += 1
+        # Simple decay for SGD phase
+        if epoch % 20 == 0:
+            for param_group in current_optimizer.param_groups:
+                param_group['lr'] *= 0.95
     
-    if (epoch + 1) % 20 == 0:
-        current_lr = optimizer.param_groups[0]['lr']
-        print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss.item():.6f}, LR: {current_lr:.2e}")
+    # Record current learning rate
+    current_lr = current_optimizer.param_groups[0]['lr']
+    learning_rates.append(current_lr)
+    
+    # Enhanced early stopping with loss smoothing
+    if len(val_loss_history) >= loss_smoothing_window:
+        smoothed_val_loss = np.mean(val_loss_history[-loss_smoothing_window:])
+        improvement_threshold = 1e-7 if not use_sgd else 1e-8  # Stricter threshold for SGD phase
+        
+        if smoothed_val_loss < best_loss - improvement_threshold:
+            best_loss = smoothed_val_loss
+            patience_counter = 0
+            # Save best model with enhanced checkpoint
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': current_optimizer.state_dict(),
+                'scaler_X': scaler_X,
+                'scaler_y': scaler_y,
+                'epoch': epoch,
+                'loss': best_loss,
+                'train_losses': train_losses,
+                'val_losses': val_losses,
+                'learning_rates': learning_rates,
+                'use_sgd': use_sgd,
+                'grad_norm_history': grad_norm_history[-1000:]  # Keep last 1000 gradient norms
+            }, 'tdoa_corrector_best_model.pth')
+        else:
+            patience_counter += 1
+    
+    # Dynamic learning rate adjustment based on loss plateau
+    if epoch > 50 and not use_sgd:
+        recent_losses = val_loss_history[-20:] if len(val_loss_history) >= 20 else val_loss_history
+        if len(recent_losses) >= 10:
+            loss_variance = np.var(recent_losses)
+            if loss_variance < 1e-10:  # Very flat loss curve
+                for param_group in current_optimizer.param_groups:
+                    param_group['lr'] *= 1.2  # Increase LR to escape plateau
+                print(f"Increased learning rate due to loss plateau at epoch {epoch+1}")
+    
+    if (epoch + 1) % 15 == 0:
+        recent_grad_norm = np.mean(grad_norm_history[-10:]) if len(grad_norm_history) >= 10 else 0
+        optimizer_name = "SGD" if use_sgd else "AdamW"
+        print(f"Epoch {epoch+1}/{epochs}, Train Loss: {avg_train_loss:.6f}, Val Loss: {val_loss.item():.6f}, "
+              f"LR: {current_lr:.2e}, Grad Norm: {recent_grad_norm:.3f}, Optimizer: {optimizer_name}")
     
     # Early stopping
     if patience_counter >= patience:
@@ -207,9 +317,10 @@ checkpoint = torch.load('tdoa_corrector_best_model.pth', weights_only=False)
 model.load_state_dict(checkpoint['model_state_dict'])
 print(f"\nBest model loaded with validation loss: {best_loss:.6f}")
 
-# Plot training history
-plt.figure(figsize=(10, 4))
-plt.subplot(1, 2, 1)
+# Plot enhanced training history
+plt.figure(figsize=(15, 5))
+
+plt.subplot(1, 3, 1)
 plt.plot(train_losses, label='Training Loss', alpha=0.7)
 plt.plot(val_losses, label='Validation Loss', alpha=0.7)
 plt.xlabel('Epoch')
@@ -217,14 +328,25 @@ plt.ylabel('Loss')
 plt.title('Training History')
 plt.legend()
 plt.grid(True, alpha=0.3)
+plt.yscale('log')
 
-plt.subplot(1, 2, 2)
-plt.plot([optimizer.param_groups[0]['lr'] for _ in range(len(train_losses))], alpha=0.7)
+plt.subplot(1, 3, 2)
+plt.plot(learning_rates, alpha=0.7, color='orange')
 plt.xlabel('Epoch')
 plt.ylabel('Learning Rate')
 plt.title('Learning Rate Schedule')
 plt.grid(True, alpha=0.3)
 plt.yscale('log')
+
+plt.subplot(1, 3, 3)
+if len(grad_norm_history) > 0:
+    # Plot gradient norm history (smoothed)
+    smoothed_grad_norms = np.convolve(grad_norm_history, np.ones(10)/10, mode='valid')
+    plt.plot(smoothed_grad_norms, alpha=0.7, color='red')
+    plt.xlabel('Training Step')
+    plt.ylabel('Gradient Norm')
+    plt.title('Gradient Norm History (Smoothed)')
+    plt.grid(True, alpha=0.3)
 
 plt.tight_layout()
 plt.show()

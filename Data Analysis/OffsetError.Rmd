@@ -1,0 +1,57 @@
+---
+title: "OffsetError"
+output: html_document
+date: "2025-07-15"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+# Mutate data
+
+```{r}
+
+data = read.csv("triangulation_data.csv", header=F)
+
+n_rows <- nrow(data)
+n_cols <- ncol(data)
+
+df <- expand.grid(
+  offset1 = 1:n_rows,
+  offset2 = 1:n_cols
+) %>%
+  mutate(error = as.vector(as.matrix(data)))
+
+```
+
+# Analyze data
+
+```{r}
+
+# Correlation between Z and X
+cor_test_o1 <- cor.test(df$error, df$offset1)
+
+# Correlation between Z and Y
+cor_test_o2 <- cor.test(df$error, df$offset2)
+
+# Output results
+cat("Correlation between Z and X:\n")
+print(cor_test_o1)
+
+cat("\nCorrelation between Z and Y:\n")
+print(cor_test_o2)
+
+
+```
+
+# Model
+
+```{r}
+
+model <- lm(error ~offset1, data = df)
+summary(model)
+
+```
+
