@@ -21,7 +21,6 @@ import cv2
 import soundfile as sf
 import noisereduce as nr
 from audioSim import Environment, Wave, getEstAzimuth, getEstDist
-from RandomForestAzimuth import AzimuthRandomForest
 
 # ====== CONFIG ======
 DEVICE_IDS = [1, 2, 3]  # hardware IDs for USB mics (switch if necessary)
@@ -29,7 +28,6 @@ SAMPLE_RATE = 44100
 RECORD_SECONDS = 9.072
 FILTER_PATH = 'denoiser_model.pth'
 SCREAM_PATH = 'scream_classifier.pth'
-AZIMUTH_PATH = 'azimuth_rf_v1.pkl'
 heading = -1
 meters = -1
 
@@ -114,8 +112,7 @@ screamModel = ScreamClassifier().to(device)
 screamModel.load_state_dict(torch.load(SCREAM_PATH, map_location=device))
 screamModel.eval()
 
-azimuthModel = AzimuthRandomForest()
-azimuthModel.load_model(AZIMUTH_PATH)
+# Here, please load random forest azimuth
 
 # ====== AUDIO FUNCTION ======
 def record_and_filter(device_id):
@@ -162,30 +159,23 @@ def class_scream(wavIdx):
 def localize(wavIdx):
     mic_positions = [[0, 0], [0.05, 0], [0.025, 0.0433]]
 
-    # Extract audio signals from torch tensors
-    sig_a = wavIdx[0].squeeze().detach().numpy()
-    sig_b = wavIdx[1].squeeze().detach().numpy()
-    sig_c = wavIdx[2].squeeze().detach().numpy()
+    fs_a, sig_a = wavIdx[0]
+    fs_b, sig_b = wavIdx[1]
+    fs_c, sig_c = wavIdx[2]
 
-    # Calculate TDOAs using GCC-PHAT
-    tdoa_ab = gcc_phat(sig_a, sig_b, SAMPLE_RATE)[0]
-    tdoa_ac = gcc_phat(sig_a, sig_c, SAMPLE_RATE)[0]
+    tdoa_ab = gcc_phat(sig_a, sig_b, fs_a)[0]
+    tdoa_ac = gcc_phat(sig_a, sig_c, fs_a)[0]
 
-    # Convert TDOAs to microseconds and predict azimuth using Random Forest
-    tdoa_ab_us = tdoa_ab * 1e6
-    tdoa_ac_us = tdoa_ac * 1e6
-    
-    # Use pre-loaded Random Forest model for azimuth prediction
-    _, heading, _ = azimuthModel.predict(tdoa_ab_us, tdoa_ac_us)
-    
-    # Estimate distance using the azimuth prediction
-    meters = getEstDist([tdoa_ab, tdoa_ac], heading, mic_positions)
+    heading = getEstAzimuth([tdoa_ab, tdoa_ac], mic_positions)
 
-    alertBase(f"IMPORTANT: Localized scream. Move on heading: {heading:.1f}° FOR meters: {meters:.1f}.")
-    
-    # if drone is overhead alert base saying person found at coords
-    if meters < 3:
+    if abs(heading - last_heading) > 150:
         alertBase(f"Person found at coordinates: {getCoords()}.")
+
+    last_heading = heading
+
+    alertBase(f"IMPORTANT: Localized scream. Move on heading: {heading}")
+
+        
 
 
 # # ====== Image Capture ======
