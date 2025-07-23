@@ -1,4 +1,9 @@
 """
+Title: Estimate time delay using GCC-PHAT 
+Author: Yihui Xiong
+Date: 2017
+Availability: https://github.com/xiongyihui/tdoa/blob/master/gcc_phat.py
+
  Estimate time delay using GCC-PHAT 
  Copyright (c) 2017 Yihui Xiong
 
@@ -13,10 +18,6 @@
  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  See the License for the specific language governing permissions and
  limitations under the License.
-
-This code was taken from the GitHub repository listed below:
-https://github.com/xiongyihui/tdoa/blob/master/gcc_phat.py
-
 """
 
 import numpy as np
